@@ -1,30 +1,93 @@
-# DRAMA Reverse-Engineering Tool and Side-Channel Tools
-This repository contains several tools to reverse engineer the undocument DRAM addressing functions on Intel CPUs. These DRAM addressing functions uncovered a new side channel, enabling DRAMA (DRAM addressing) attacks.
-These attacks exploit the DRAM row buffer that is shared, even in multi-processor systems. Apart from that our attack improves Rowhammer attacks and enabled the first successful Rowhammer attacks on DDR4 memory.
+# DRAMA++: A fast and robust DRAM address-map reverse-engineering tool
 
-The "[DRAMA](https://www.usenix.org/conference/usenixsecurity16/technical-sessions/presentation/pessl)" paper by Pessl, Gruss, Maurice, Schwarz, and Mangard will be published at the Usenix Security Symposium 2016.
+This code is based on [DRAMA](https://github.com/isec-tugraz/drama) and includes the following improvements:
 
-## One note before starting
+- Added support for the ARM64 architecture.
+- Implemented a faster GF(2) solver with polynomial-time complexity (the original version has exponential-time complexity).
+- Fixed a logical bug that prevented high-order physical address bits from being considered.
+- Fixed a logical bug that left the `base` address in the address pool when it should have been added to the set.
+- Improved timing measurements.
+- Additional changes for improved functionality, usability, reliability, and portability.
 
-**Warning:** This code is provided as-is. You are responsible for protecting yourself, your property and data, and others from any risks caused by this code. This code may not detect vulnerabilities of your applications. This code is only for testing purposes. Use it only on test systems which contain no sensitive data.
+To see all changes, run:
 
-The programs should work on x86-64 Intel CPUs with a recent Linux. Note that the code contains hardcoded addresses and thresholds that are specific to our test systems. Please adapt these addresses and thresholds to your system.
+```
+git diff c5c83471...HEAD re/measure.cpp
+```
 
-## Reverse-engineering your DRAM addressing functions
-You can find the reverse engineering tool in the folder ''re''. Simply start the reverse engineering tool fixed to one CPU core, e.g. using [taskset](http://linuxcommand.org/man_pages/taskset1.html). The tool needs access to ''/proc/self/pagemap'' to translate virtual to physical addresses. Make sure the tool can access this file. Alternatively you can also make the tool use 1GB pages and remove the virtual to physical address translation.
+## Usage
 
-The default settings are 8 expected sets. 60% of the physical memory are mapped for the address selection. You can provide different values via the command line argument ''-s'' and ''-p'' respectively. For example, to use 70% of the physical memory with a DRAM organization of 1 DIMM, 1 channel, 2 ranks and 8 banks (=1 * 1 * 2 * 8 = 16 sets), you would start the tool in the following way: `taskset 0x2 sudo ./measure -p 0.7 -s 16`.
+### Prerequisites
 
-After the measurement is done, the tool outputs the reverse-engineered functions with a confidence how probable it is that they are correct. If the probability is low, try to run the tool again on a different CPU core and/or a different amount of mapped physical mapping. Also, ensure that the background noise on the machine is reduced to a minimum.
+- Linux (x86-64 or ARM64) with a recent kernel.
+- `g++` and `make` installed.
+- Permission to read `/proc/self/pagemap` (often requires `sudo`).
+- The tool attempts huge pages first and falls back to regular pages if unavailable.
 
-## DRAMA side channel attack
-Start by generating a histogram of row hits and row conflicts.
-You can find a tool for that in the ''sc'' folder. You need to adapt the DRAM functions that are hard-coded in the source code right now to the functions you obtained in the reverse-engineering step.
+### Build
 
-Modify the spy tool in the ''sc'' folder to use the threshold you found by running the histogram tool.
+```
+cd re
+make
+```
 
-The spy tool runs in an endless loop and will measure row hits on its own memory. As soon as it found a significant number of row hits it will switch to a short 30 second exploitation phase (as a proof-of-concept).
-For instance, if you hold down a key in your webbrowser you will eventually find a DRAM row that has a significant number of row hits. This can be a matter of seconds to minutes. If you don't find anything, try again later, you likely will have other physical addresses then. As soon as the exploitation phase runs, you can check whether row hits on this row really are a reliable side channel for the event you want to spy on. If not, just let the search continue.
+This produces the `measure` binary in `re/`.
 
-To speed up the search slightly and also to provide more information to the user, the spy tool uses ''/proc/self/pagemap''. Make sure the tool can access this file.
+### Run
 
+Measure DRAM bank functions and save them to `map.txt`:
+
+```
+./measure [-b <start bit>] [-e <end bit>] [-c <cpu core>] [-r <scale factor>] [-m <memory size>] [-g <memory size in GB>] [-i <outer loops>] [-j <inner loops>] [-s <expected sets>] [-q <sets for early quit>] [-t <threshold cycles>] [-v <verbosity>] [-f <output file>]
+
+```
+
+Notes:
+- `-s`: expected sets = DIMMs × ranks × banks (e.g., 1×2×8 = 16).
+- `-m`/`-g`: memory to map. `-m` accepts MB by default and also supports `M`/`G` suffixes (e.g., `-m 1024`, `-m 1G`).
+- `-c`: pin to a CPU core (you can also use `taskset`).
+- `-r`: timing scale factor (advanced tuning).
+- `-i`/`-j`: outer/inner loop counts; ARM64 may benefit from a higher `-j`.
+- `-t`: timing threshold (cycles) to override auto gap detection.
+- `-b`/`-e`: search bit window (defaults: 5..40).
+- `-q`: stop after N sets are found.
+- `-v`: verbosity level.
+- `-f`: output file for discovered functions (default `map.txt`).
+
+### Outputs
+
+- `setN.txt`: physical addresses of each discovered same-bank set.
+- `map.txt`: one line per XOR function with the physical address bit indices.
+
+### Example
+
+1 DIMM, 1 channel, 2 ranks, 8 banks (16 sets), mapping 1 GB:
+
+```
+sudo ./measure -s 16 -g 1
+```
+
+## DRAM Bank Map Database
+See: [Found-DRAM-BankMap.md](./Found-DRAM-BankMap.md) for examples of discovered DRAM bank-mapping functions.
+
+## Speed Comparison
+
+| Platform | DRAMA | DRAMA++ |
+|-----------------------|------------|----------|
+| Xeon E3-1220 v5 (64 banks) | 54.5s<sup>1</sup> | 3.4s<sup>2</sup> |
+| Raspberry Pi 4 (8 banks) | N/A | 0.6s |
+
+- <sup>1</sup> DRAMA option used: `-s 64 -n 10` (the default `n=5000` took more than 10 minutes and did not recover the map).
+- <sup>2</sup> DRAMA++ option used: `-s 64` (manually setting a threshold such as `-t 300` can make it even faster and more reliable).
+
+## Citation
+
+If you use this tool, please cite:
+
+    @inproceedings{sullivan2026rtas,
+        title = {{Per-Bank Memory Bandwidth Regulation for Predictable and Performant Real-Time Systems}},
+        author = {Connor Sullivan and Amin Mamandipoor and Cole Strickler and Heechul Yun},
+        booktitle = {IEEE Real-Time and Embedded Technology and Applications Symposium (RTAS)},
+        year = {2026},
+        month = {May}
+    }
