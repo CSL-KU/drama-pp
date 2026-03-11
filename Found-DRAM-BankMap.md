@@ -16,7 +16,7 @@
 	16 20
 	17 21
 
-## Dell E6420/i5-2520M (Sandybridge, 16GB, 2-dimms )
+## Dell E6420/i5-2520M (Sandybridge, 16GB, 2-dimms)
 
 	Interferred mapping:
 	14 18
@@ -123,3 +123,15 @@
 	10 23 28
 	13 24 29
 	6 9 10 11 12 13
+
+	
+## Intel i7-8700 6-Core Processor (Coffee Lake, 4x 8GB DDR4 dimm, 2 ranks/dimm)
+
+	Infered mapping:
+	7 14
+	15 20
+	16 21
+	17 22
+	18 23
+	19 24
+	8 9 12 13 18 19
