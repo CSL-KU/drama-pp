@@ -80,6 +80,9 @@ See: [Found-DRAM-BankMap.md](./Found-DRAM-BankMap.md) for examples of discovered
 - <sup>1</sup> DRAMA option used: `-s 64 -n 10` (the default `n=5000` took more than 10 minutes and did not recover the map).
 - <sup>2</sup> DRAMA++ option used: `-s 64` (manually setting a threshold such as `-t 300` can make it even faster and more reliable).
 
+## Limitations
+As in the original DRAMA, non-linear mappings are currently not supported. 
+
 ## Citation
 
 If you use this tool, please cite:
