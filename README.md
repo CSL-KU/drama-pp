@@ -81,7 +81,7 @@ See: [Found-DRAM-BankMap.md](./Found-DRAM-BankMap.md) for examples of discovered
 - <sup>2</sup> DRAMA++ option used: `-s 64` (manually setting a threshold such as `-t 300` can make it even faster and more reliable).
 
 ## Limitations
-As in the original DRAMA, non-linear mappings are currently not supported. 
+DRAMA++ currently assumes that the analyzed address space is governed by a single uniform XOR-based mapping. However, on asymmetric DIMMs or in systems with rank- or DIMM-specific address transformations, the observed timing behavior may reflect multiple local mappings rather than one global mapping. In this case, a reconstruction procedure based on a single GF(2) system may fail, even if each local mapping is individually linear or affine. Extending DRAMA++ to support such asymmetric configurations is left for future work.
 
 ## Citation
 
