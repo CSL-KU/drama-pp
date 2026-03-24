@@ -33,6 +33,8 @@ make
 
 This produces the `measure` binary in `re/`.
 
+The region-aware offline solver lives in `re/gf2_bank_solver.py`.
+
 ### Run
 
 Measure DRAM bank functions and save them to `map.txt`:
@@ -58,6 +60,63 @@ Notes:
 
 - `setN.txt`: physical addresses of each discovered same-bank set.
 - `map.txt`: one line per XOR function with the physical address bit indices.
+- `recovered_bank_mapping.txt`: output of `gf2_bank_solver.py`.
+    On symmetric systems this is the legacy flat format.
+    On asymmetric systems it can be a piecewise format with region blocks and selector terms.
+
+### Offline Solver
+
+The Python solver can still recover a single flat mapping from `setN.txt` files:
+
+```
+python3 gf2_bank_solver.py --files set*.txt
+```
+
+For asymmetric systems, it also supports region-aware recovery:
+
+```
+python3 gf2_bank_solver.py --files set*.txt --auto-regions
+```
+
+Useful tuning flags for asymmetric layouts:
+
+- `--auto-top-splits <N>`: limit how many promising selector terms are explored per unresolved branch.
+- `--auto-max-selector-bits <N>`: cap the XOR width of one selector term.
+- `--auto-max-depth <N>`: cap recursive region splitting depth.
+- `--auto-diagnostics-limit <N>`: bound how many unresolved branches and suggested follow-up splits are reported on failure.
+
+For example:
+
+```
+python3 gf2_bank_solver.py --files set*.txt --auto-regions --auto-top-splits 12 --auto-diagnostics-limit 6
+```
+
+If the heuristic search is not sufficient, provide explicit region definitions:
+
+```
+python3 gf2_bank_solver.py --files set*.txt --regions-file regions.txt
+```
+
+Manual region files support two syntaxes:
+
+```
+region 0x40 0x0
+region 0x40 0x40
+```
+
+or the more general selector-block form:
+
+```
+region
+selector 0 6
+selector 1 14 17
+
+region
+selector 1 6
+selector 0 16 19
+```
+
+Each `selector` line means that the XOR of the listed physical-address bits must equal the given `0` or `1` value.
 
 ### Example
 
@@ -81,7 +140,15 @@ See: [Found-DRAM-BankMap.md](./Found-DRAM-BankMap.md) for examples of discovered
 - <sup>2</sup> DRAMA++ option used: `-s 64` (manually setting a threshold such as `-t 300` can make it even faster and more reliable).
 
 ## Limitations
-DRAMA++ currently assumes that the analyzed address space is governed by a single uniform XOR-based mapping. However, on asymmetric DIMMs or in systems with rank- or DIMM-specific address transformations, the observed timing behavior may reflect multiple local mappings rather than one global mapping. In this case, a reconstruction procedure based on a single GF(2) system may fail, even if each local mapping is individually linear or affine. Extending DRAMA++ to support such asymmetric configurations is left for future work.
+DRAMA++ no longer silently accepts a bogus single global mapping on asymmetric configurations. The offline solver can now:
+
+- fail loudly when the discovered sets cannot be labeled by one unique global XOR mapping,
+- recover piecewise local mappings from explicit region definitions, and
+- attempt recursive heuristic region discovery using raw-bit and XOR-based selector terms.
+
+The automatic region search is best-effort. Some highly interleaved asymmetric layouts may still require a manual `--regions-file` to fully separate the local mappings.
+
+When auto-region search cannot finish, the solver now reports the unresolved selector branch, the affected `setN.txt` files, and a short list of promising next selector terms to try manually.
 
 ## Citation
 
