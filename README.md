@@ -64,6 +64,11 @@ Notes:
     On symmetric systems this is the legacy flat format.
     On asymmetric systems it can be a piecewise format with region blocks and selector terms.
 
+The repository also includes a validated asymmetric example mapping and matching manual region file:
+
+- `re/recovered_bank_mapping-hynix-2x4GB+elpida-1x8GB-correct.txt`
+- `re/regions-hynix-2x4GB+elpida-1x8GB-correct.txt`
+
 ### Offline Solver
 
 The Python solver can still recover a single flat mapping from `setN.txt` files:
@@ -84,11 +89,18 @@ Useful tuning flags for asymmetric layouts:
 - `--auto-max-selector-bits <N>`: cap the XOR width of one selector term.
 - `--auto-max-depth <N>`: cap recursive region splitting depth.
 - `--auto-diagnostics-limit <N>`: bound how many unresolved branches and suggested follow-up splits are reported on failure.
+- `--auto-trace-depth <N>`: keep `--verbose` auto-region tracing readable by limiting how deep recursive branch logs go.
+
+To save the recovered selector blocks as a starter manual regions file:
+
+```
+python3 gf2_bank_solver.py --files set*.txt --auto-regions --emit-regions-file regions.txt
+```
 
 For example:
 
 ```
-python3 gf2_bank_solver.py --files set*.txt --auto-regions --auto-top-splits 12 --auto-diagnostics-limit 6
+python3 gf2_bank_solver.py --files set*.txt --auto-regions --auto-top-splits 12 --auto-diagnostics-limit 6 --auto-trace-depth 1
 ```
 
 If the heuristic search is not sufficient, provide explicit region definitions:

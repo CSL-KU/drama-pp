@@ -83,3 +83,19 @@ test-output/
 # Example: to ignore only auto-generated maps:
 # *_map.txt
 # generated/*.txt
+
+# Local DRAMA++ build / measurement outputs
+/re/bank_id
+/re/measure
+/re/map.txt
+/re/log-*.txt
+/re/sets-*/
+/re/x
+/re/x.txt
+/re/x2
+/re/hynix-2x4GB.txt
+/re/hynix-2x4GB+elpida-1x8GB.txt
+/re/recovered_bank_mapping.txt
+/re/recovered_bank_mapping-*.txt
+!/re/recovered_bank_mapping-hynix-2x4GB+elpida-1x8GB-correct.txt
+!/re/regions-hynix-2x4GB+elpida-1x8GB-correct.txt

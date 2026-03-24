@@ -1,0 +1,26 @@
+# Piecewise DRAM bank mapping
+# global_color = (region_index << 4) | local_color
+region
+selector 0 6
+selector 0 16
+# region_index 0
+14 19
+15 20
+17 21
+18 22
+
+region
+selector 0 6
+selector 1 16
+# region_index 1
+14 18
+15 19
+17 20
+
+region
+selector 1 6
+# region_index 2
+14 17
+15 18
+16 19
+

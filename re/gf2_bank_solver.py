@@ -615,6 +615,13 @@ def print_branch_diagnostics(diagnostics: Sequence[BranchDiagnostic], limit: int
                 )
 
 
+def print_auto_trace(verbose: bool, depth: int, trace_depth_limit: int, message: str) -> None:
+    if not verbose or depth > trace_depth_limit:
+        return
+    indent = '  ' * depth
+    print(f'{indent}{message}', file=sys.stderr)
+
+
 def find_auto_regions_recursive(
     bank_sets: Sequence[BankSet],
     lowbit: int,
@@ -625,26 +632,38 @@ def find_auto_regions_recursive(
     max_top_splits: int,
     diagnostics_limit: int,
     verbose: bool,
+    trace_depth_limit: int,
+    depth: int,
 ) -> Optional[AutoRegionCandidate]:
-    try:
-        solved = solve_region(bank_sets, lowbit, highbit)
+    progress = solve_region_progress(bank_sets, lowbit, highbit)
+    if progress.unique_bank_codes == len(bank_sets):
+        solved = progress.result
         solved.selector = selector
+        print_auto_trace(
+            verbose,
+            depth,
+            trace_depth_limit,
+            f'solved {selector.describe()}: {len(bank_sets)} set(s), {solved.bit_count} local bit(s)',
+        )
         return AutoRegionCandidate(results=[solved], score=candidate_score([solved]), diagnostics=[])
-    except RuntimeError as exc:
-        if remaining_depth <= 0:
-            diagnostic = build_branch_diagnostic(
-                selector,
-                bank_sets,
-                lowbit,
-                highbit,
-                max_term_width,
-                tuple(term.bits for term in selector.terms),
-                str(exc),
-                diagnostics_limit,
-            )
-            if verbose:
-                print(f'Auto split stopped at {selector.describe()}: {exc}', file=sys.stderr)
-            return AutoRegionCandidate(results=[], score=(sys.maxsize, sys.maxsize, sys.maxsize, sys.maxsize), diagnostics=[diagnostic])
+
+    reason = (
+        f'Only {progress.unique_bank_codes}/{len(bank_sets)} unique bank codes were recovered; '
+        'the region still contains multiple local mappings.'
+    )
+    if remaining_depth <= 0:
+        diagnostic = build_branch_diagnostic(
+            selector,
+            bank_sets,
+            lowbit,
+            highbit,
+            max_term_width,
+            tuple(term.bits for term in selector.terms),
+            reason,
+            diagnostics_limit,
+        )
+        print_auto_trace(verbose, depth, trace_depth_limit, f'stopped {selector.describe()}: {reason}')
+        return AutoRegionCandidate(results=[], score=(sys.maxsize, sys.maxsize, sys.maxsize, sys.maxsize), diagnostics=[diagnostic])
 
     used_terms = tuple(term.bits for term in selector.terms)
     best: Optional[AutoRegionCandidate] = None
@@ -662,9 +681,24 @@ def find_auto_regions_recursive(
             'no stable selector terms remained',
             diagnostics_limit,
         )
+        print_auto_trace(verbose, depth, trace_depth_limit, f'no further stable splits under {selector.describe()}')
         return AutoRegionCandidate(results=[], score=(sys.maxsize, sys.maxsize, sys.maxsize, sys.maxsize), diagnostics=[diagnostic])
 
+    print_auto_trace(
+        verbose,
+        depth,
+        trace_depth_limit,
+        f'search {selector.describe()}: {progress.unique_bank_codes}/{len(bank_sets)} unique codes, trying {len(split_candidates)} split(s)',
+    )
+
     for bits, groups in split_candidates:
+        split_score = score_split_candidate(groups, lowbit, highbit)
+        print_auto_trace(
+            verbose,
+            depth,
+            trace_depth_limit,
+            f'try {format_selector_bits(bits)} -> sizes {len(groups[0])}/{len(groups[1])}, unresolved score {split_score[0]}/{split_score[1]}',
+        )
         child_results: List[RegionSolveResult] = []
         child_diags: List[BranchDiagnostic] = []
         for expected in (0, 1):
@@ -679,6 +713,8 @@ def find_auto_regions_recursive(
                 max_top_splits,
                 diagnostics_limit,
                 verbose,
+                trace_depth_limit,
+                depth + 1,
             )
             if child_candidate is None:
                 child_results = []
@@ -692,9 +728,7 @@ def find_auto_regions_recursive(
             score=candidate_score(child_results),
             diagnostics=child_diags,
         )
-        if verbose:
-            bit_label = format_selector_bits(bits)
-            print(f'Auto-region recursive split on {bit_label} score={candidate.score}', file=sys.stderr)
+        print_auto_trace(verbose, depth, trace_depth_limit, f'candidate {format_selector_bits(bits)} score={candidate.score}')
         if best is None or candidate.score < best.score:
             best = candidate
     if best is not None:
@@ -723,6 +757,7 @@ def find_auto_regions(
     max_top_splits: int,
     diagnostics_limit: int,
     verbose: bool,
+    trace_depth_limit: int,
 ) -> Optional[AutoRegionCandidate]:
     candidate = find_auto_regions_recursive(
         bank_sets,
@@ -734,6 +769,8 @@ def find_auto_regions(
         max_top_splits,
         diagnostics_limit,
         verbose,
+        trace_depth_limit,
+        0,
     )
     if candidate is None or len(candidate.results) > max_regions:
         return None
@@ -771,6 +808,18 @@ def write_mapping_file(path: str, results: Sequence[RegionSolveResult], lowbit: 
             handle.write('\n')
 
 
+def write_regions_file(path: str, results: Sequence[RegionSolveResult]) -> None:
+    with open(path, 'w', encoding='utf-8') as handle:
+        handle.write('# Starter manual region file generated by gf2_bank_solver.py\n')
+        handle.write('# Edit selector blocks as needed and pass this file back with --regions-file.\n\n')
+        for idx, result in enumerate(results):
+            selector = result.selector if result.selector is not None else RegionSelector(tuple())
+            for line in selector.format_block():
+                handle.write(f'{line}\n')
+            if idx + 1 != len(results):
+                handle.write('\n')
+
+
 def print_solution_report(results: Sequence[RegionSolveResult], lowbit: int, source: str) -> None:
     print(f'=== Solve mode: {source} ===')
     max_local_bits = max((result.bit_count for result in results), default=0)
@@ -798,12 +847,14 @@ def main() -> None:
     parser.add_argument('--highbit', type=int, default=40, help='Highest PA bit to include (inclusive).')
     parser.add_argument('--output', default='recovered_bank_mapping.txt', help='Output mapping file path.')
     parser.add_argument('--regions-file', help='Manual region definitions using region/selector blocks or region <mask> <value>.')
+    parser.add_argument('--emit-regions-file', help='Write the recovered selectors as a starter manual regions file.')
     parser.add_argument('--auto-regions', action='store_true', help='Infer a piecewise mapping by recursively searching for selector terms.')
     parser.add_argument('--auto-max-selector-bits', type=int, default=2, help='Maximum number of PA bits in one auto-discovered selector term.')
     parser.add_argument('--auto-max-depth', type=int, default=4, help='Maximum recursive auto-region split depth.')
     parser.add_argument('--auto-max-regions', type=int, default=8, help='Maximum number of regions considered during auto-discovery.')
     parser.add_argument('--auto-top-splits', type=int, default=16, help='Maximum number of promising selector terms explored per unresolved branch.')
     parser.add_argument('--auto-diagnostics-limit', type=int, default=8, help='Maximum number of unresolved branches or suggested splits reported on failure.')
+    parser.add_argument('--auto-trace-depth', type=int, default=0, help='Maximum recursion depth printed by --verbose auto-region tracing.')
     parser.add_argument('--verbose', action='store_true', help='Print extra diagnostics.')
     args = parser.parse_args()
 
@@ -834,6 +885,7 @@ def main() -> None:
             args.auto_top_splits,
             args.auto_diagnostics_limit,
             args.verbose,
+            args.auto_trace_depth,
         )
         if candidate is not None and candidate.results and candidate.score[0] == 0:
             results = candidate.results
@@ -861,6 +913,9 @@ def main() -> None:
     print_solution_report(results, args.lowbit, source)
     write_mapping_file(args.output, results, args.lowbit)
     print(f'Stored recovered mapping to {args.output}')
+    if args.emit_regions_file:
+        write_regions_file(args.emit_regions_file, results)
+        print(f'Stored starter regions file to {args.emit_regions_file}')
 
 
 if __name__ == '__main__':
