@@ -59,25 +59,27 @@ Notes:
 ### Outputs
 
 - `setN.txt`: physical addresses of each discovered same-bank set.
-- `map.txt`: one line per XOR function with the physical address bit indices.
-- `recovered_bank_mapping.txt`: output of `gf2_bank_solver.py`.
-    On symmetric systems this is the legacy flat format.
-    On asymmetric systems it can be a piecewise format with region blocks and selector terms.
+- `map.txt`: recovered bank map. one line per XOR function with the physical address bit indices. 
 
-The repository also includes a validated asymmetric example mapping and matching manual region file:
+### Example
 
-- `re/recovered_bank_mapping-hynix-2x4GB+elpida-1x8GB-correct.txt`
-- `re/regions-hynix-2x4GB+elpida-1x8GB-correct.txt`
+1 DIMM, 1 channel, 2 ranks, 8 banks (16 sets), mapping 1 GB:
+
+```
+sudo ./measure -s 16 -g 1
+```
 
 ### Offline Solver
 
-The Python solver can still recover a single flat mapping from `setN.txt` files:
+We additionally provide an offline Python solver that can reconstruct the bankmap from the samebank set files (`setN.txt`) produced by `measure` above. Unlike the C++ solver in `measure`, the Python solver also supports asymmetric layouts where different address regions use different local bank maps. 
+
+For standard flat XOR mapped systems, the Python solver will analyze the sambank set files and generate `recovered_bank_mapping.txt`, which should be identifical to `map.txt`:
 
 ```
 python3 gf2_bank_solver.py --files set*.txt
 ```
 
-For asymmetric systems, it also supports region-aware recovery:
+For asymmetric systems, it supports region-aware recovery as follow:
 
 ```
 python3 gf2_bank_solver.py --files set*.txt --auto-regions
@@ -129,14 +131,6 @@ selector 0 16 19
 ```
 
 Each `selector` line means that the XOR of the listed physical-address bits must equal the given `0` or `1` value.
-
-### Example
-
-1 DIMM, 1 channel, 2 ranks, 8 banks (16 sets), mapping 1 GB:
-
-```
-sudo ./measure -s 16 -g 1
-```
 
 ## DRAM Bank Map Database
 See: [Found-DRAM-BankMap.md](./Found-DRAM-BankMap.md) for examples of discovered DRAM bank-mapping functions.
