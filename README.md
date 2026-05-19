@@ -44,7 +44,7 @@ Measure DRAM bank functions and save them to `map.txt`:
 
 Notes:
 - `-s`: expected sets = DIMMs × ranks × banks (e.g., 1×2×8 = 16).
-- `-m`/`-g`: memory to map. `-m` accepts MB by default and also supports `M`/`G` suffixes (e.g., `-m 1024`, `-m 1G`).
+- `-m`/`-g`: memory to map. (e.g., `-m 1024` or `-g 1` for 1024MB or 1GB, respectively).
 - `-c`: pin to a CPU core (you can also use `taskset`).
 - `-r`: timing scale factor (advanced tuning).
 - `-i`/`-j`: outer/inner loop counts; ARM64 may benefit from a higher `-j`.
