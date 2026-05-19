@@ -496,6 +496,25 @@ void save_bank_functions(const char* filename,
     printf("Bank mapping functions saved to %s\n", filename);
 }
 
+void usage()
+{
+    printf("Usage: measure [options]\n");
+    printf("Options:\n");
+    printf("  -b <start_bit>      Starting bit for function search (default: 5)\n");
+    printf("  -e <end_bit>        Ending bit for function search (default: 40)\n");
+    printf("  -c <cpu_affinity>   CPU core to bind to (default: 0)\n");
+    printf("  -g <mapping_size>   Size of memory mapping in GB (default: 1GB)\n");
+    printf("  -m <mapping_size>   Size of memory mapping with optional suffix (e.g. 512M, 2G) (default: 1GB)\n");
+    printf("  -r <scale_factor>   Scale factor for timing results (default: 1)\n");
+    printf("  -i <num_reads_outer> Number of outer loop reads for timing (default: 10)\n");
+    printf("  -j <num_reads_inner> Number of inner loop reads for timing (default: 1, use higher for ARM64)\n");
+    printf("  -s <expected_sets>  Expected number of sets to find (default: 16)\n");
+    printf("  -q <quit_sets>      Quit early after finding this many sets (default: -1, meaning find all expected sets)\n");
+    printf("  -t <samebank_threshold> Threshold in cycles to separate same-bank from different-bank timings (default: auto-detect)\n");
+    printf("  -v <verbosity>      Verbosity level (0=silent, higher=more verbose, default: 1)\n");
+    printf("  -f <output_file>    Output file to save discovered bank functions (default: none, print to stdout)\n");
+}
+
 // ----------------------------------------------
 int main(int argc, char *argv[]) {
     size_t tries, t;
@@ -514,7 +533,7 @@ int main(int argc, char *argv[]) {
     }
     printf("\n");
 
-    while ((c = getopt(argc, argv, "b:c:e:r:g:m:i:j:s:q:t:v:f:")) != EOF) {
+    while ((c = getopt(argc, argv, "b:c:e:r:g:m:i:j:s:q:t:v:f:h")) != -1) {
         switch (c) {
         case 'b':
             g_start_bit = atoi(optarg);
@@ -529,18 +548,7 @@ int main(int argc, char *argv[]) {
             mapping_size = atol(optarg) * 1024 * 1024 * 1024;
             break;
         case 'm':
-            if (optarg[strlen(optarg)-1] == 'G' || optarg[strlen(optarg)-1] == 'g') {
-                // if the last character is 'G' or 'g', treat as GB
-                optarg[strlen(optarg)-1] = '\0'; // remove last char
-                mapping_size = atol(optarg) * 1024 * 1024 * 1024;
-            } else if (optarg[strlen(optarg)-1] == 'M' || optarg[strlen(optarg)-1] == 'm') {
-                // if the last character is 'M' or 'm', treat as MB
-                optarg[strlen(optarg)-1] = '\0'; // remove last char
-                mapping_size = atol(optarg) * 1024 * 1024;
-            } else {
-                // default: treat as MB
-                mapping_size = atol(optarg) * 1024 * 1024;
-            }
+            mapping_size = atol(optarg) * 1024 * 1024;
             break;
         case 'r':
             g_scale_factor = atoi(optarg);
@@ -566,15 +574,13 @@ int main(int argc, char *argv[]) {
         case 'f':
             g_output_file = optarg;
             break;
-        case ':':
-            printf("Missing option.\n");
-            exit(1);
+        case 'h':
+            usage();
+            exit(0);
             break;
         default:
-            printf(
-                "Usage %s [-m <memory size in MB> | -g <memory size in GB>] [-i <number of outer loops>] [-j <number of inner loops>] [-s <expected sets>] [-q <sets for early quit>] [-t <threshold cycles>] [-f <output file>]\n",
-                argv[0]);
-            exit(0);
+            usage();
+            exit(1);
             break;
         }
     }
@@ -587,7 +593,7 @@ int main(int argc, char *argv[]) {
     logInfo("Mapping has %zu MB\n", mapping_size / 1024 / 1024);
 
     logDebug("CPU: %s\n", getCPUModel());
-    logDebug("Number of reads: %lu x %lu\n", num_reads_outer, num_reads_inner)
+    logDebug("Number of reads: %lu x %lu\n", num_reads_outer, num_reads_inner);
     logDebug("Expected sets: %lu\n", expected_sets);
 
     // affinity to core cpu_affinity
@@ -947,7 +953,7 @@ int main(int argc, char *argv[]) {
 
     // display found functions
     for (int bits = 1; bits <= MAX_XOR_BITS; bits++) {
-	    logInfo("Bits: %d, sz=%d\n", bits, (int)functions[bits].size());
+	    logDebug("Bits: %d, sz=%d\n", bits, (int)functions[bits].size());
 
         for (int i = 0; i < functions[bits].size(); i++) {
             bool show = true;
