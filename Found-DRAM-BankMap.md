@@ -43,7 +43,7 @@
 	18 22
 	8 9 12 13 15 18
 
-## Intel Intel(R) Xeon(R) CPU E5-2608L v3 (Haswell, 4xdimms, 1 dimm = DDR4 4GB)
+## Intel(R) Xeon(R) CPU E5-2608L v3 (Haswell, 4xdimms, 1 dimm = DDR4 4GB)
 
 	Inferred mapping:
 	6 22
