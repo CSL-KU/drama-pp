@@ -522,7 +522,7 @@ int main(int argc, char *argv[]) {
     std::map<int, std::list<addrpair> > timing;
     size_t hist[MAX_HIST_SIZE];
     int c;
-    int samebank_threshold = -1;
+    int samebank_threshold = 0; // -1: use gap search, 0: use k-means clustering, >0: use this value as threshold
     int cpu_affinity = -1;
     int quit_sets = -1; // number of sets to quit early
 
@@ -725,6 +725,50 @@ int main(int argc, char *argv[]) {
 
         if (samebank_threshold > 0) {
             found = samebank_threshold;
+        } else if (samebank_threshold == 0) {
+            // weighted k-means for 2 clusters using hist[] as weight
+            double cluster1 = (double)min;
+            double cluster2 = (double)max;
+            double prev_cluster1 = -1e9;
+            double prev_cluster2 = -1e9;
+            int max_iterations = 1000;
+            int iterations = 0;
+            const double EPS = 1e-6;
+
+            while ((fabs(cluster1 - prev_cluster1) > EPS || fabs(cluster2 - prev_cluster2) > EPS) &&
+                    iterations < max_iterations) {
+                prev_cluster1 = cluster1;
+                prev_cluster2 = cluster2;
+
+                int64_t sum1 = 0, sum2 = 0;
+                int64_t cnt1 = 0, cnt2 = 0;
+
+                for (int b = min; b <= max; b++) {
+                    size_t c = hist[b];
+                    if (c == 0) continue;
+                    int d1 = abs(b - cluster1);
+                    int d2 = abs(b - cluster2);
+                    if (d1 < d2) {
+                        sum1 += c * b;
+                        cnt1 += c;
+                    } else {
+                        sum2 += c * b;
+                        cnt2 += c;
+                    }
+                }
+
+                if (cnt1 > 0) cluster1 = (double)sum1 / cnt1;
+                if (cnt2 > 0) cluster2 = (double)sum2 / cnt2;
+
+                iterations++;
+
+                logDebug("K-means iteration %d: cluster1: %.2f cluster2: %.2f\n",
+                            iterations, cluster1, cluster2);
+            }
+
+            found = (int)(cluster2 - (cluster2 - cluster1) / 4.0); // biased towards cluster2
+            logDebug("K-means clustering found threshold at %d (cluster1: %d, cluster2: %d)\n",
+                        found, (int)cluster1, (int)cluster2);
         } else {
             // find a gap of at least 5 empty bins, starting from the right (high cycle counts)
             for (int i = max; i >= min; i--) {
