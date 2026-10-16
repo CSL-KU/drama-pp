@@ -522,7 +522,7 @@ int main(int argc, char *argv[]) {
     std::map<int, std::list<addrpair> > timing;
     size_t hist[MAX_HIST_SIZE];
     int c;
-    int samebank_threshold = 0; // -1: use gap search, 0: use k-means clustering, >0: use this value as threshold
+    int samebank_threshold = 0; // default: use gap search, >0: use this value as threshold, -2: use k-means clustering
     int cpu_affinity = -1;
     int quit_sets = -1; // number of sets to quit early
 
@@ -725,7 +725,7 @@ int main(int argc, char *argv[]) {
 
         if (samebank_threshold > 0) {
             found = samebank_threshold;
-        } else if (samebank_threshold == 0) {
+        } else if (samebank_threshold == -2) {
             // weighted k-means for 2 clusters using hist[] as weight
             double cluster1 = (double)min;
             double cluster2 = (double)max;
