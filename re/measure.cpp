@@ -644,6 +644,8 @@ int main(int argc, char *argv[]) {
     int failed;
     uint64_t measure_count = 0;
 
+    int prev_found_cycle = 0;
+
     while (found_sets < expected_sets) {
         for (size_t i = 0; i < MAX_HIST_SIZE; ++i)
             hist[i] = 0;
@@ -660,6 +662,30 @@ int main(int argc, char *argv[]) {
         std::advance(ait, rand() % addr_pool.size());
         base = ait->first;
         base_phys = ait->second;
+
+        // verify that base address is not already in any of the found sets
+        // the verification is done by checking if the measured timing between the first
+        // address of each found set and the new base address shows a row hit (low timing)
+        // or a row miss (high timing). If the timing is high, it means that the new base
+        // address is in the same bank as the first address of the found set, and thus
+        // should not be used as a base address for a new set. If the timing is low, it
+        // means that the new base address is in a different bank, and can be used as a base
+        // address for a new set.
+        if (found_sets > 0) {
+            logDebug("Verifying base address 0x%lx against %d found sets...\n", base, found_sets);
+
+            for (size_t s = 0; s < found_sets; s++) {
+                if (sets[s].size() == 0) continue;
+                pointer set_base = sets[s][0].first;
+                uint64_t timing = getTiming(base, set_base);
+                if (timing >= prev_found_cycle) {
+                    logError("Base address 0x%lx is in the same bank as set %zu (timing: %lu >= %d), skipping...\n", base, s, timing, prev_found_cycle);
+                    goto search_set;
+                }
+            }
+        }
+
+        // remove base address from pool to avoid reusing it
         addr_pool.erase(ait);
 
         logInfo("Searching for set %d (try %d): base_phy=0x%lx\n",
@@ -720,8 +746,9 @@ int main(int argc, char *argv[]) {
 
             printf("\n");
         }
+
         // find separation
-        int empty = 0, found = 0;
+        int empty = 0, found = 0; // found is the threshold to separate same-bank from different-bank timings
 
         if (samebank_threshold > 0) {
             found = samebank_threshold;
@@ -789,6 +816,7 @@ int main(int argc, char *argv[]) {
         }
 
         new_set.push_back(std::make_pair(base, base_phys)); // this is needed. another bug in the original code
+        prev_found_cycle = found;
 
         // remove found addresses from pool
         for (hit = timing.begin(); hit != timing.end(); hit++) {
