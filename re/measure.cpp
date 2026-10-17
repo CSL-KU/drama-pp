@@ -623,7 +623,7 @@ int main(int argc, char *argv[]) {
     int found_sets = 0;
     int found_siblings = 0;
 
-    tries = expected_sets * 125; // DEBUG: original 125.
+    tries = (expected_sets + 1) * 125; // #of address samples to try.
 
     // build address pool
     while (int cur_count = addr_pool.size() < tries) {
