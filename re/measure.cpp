@@ -688,7 +688,7 @@ int main(int argc, char *argv[]) {
         // remove base address from pool to avoid reusing it
         addr_pool.erase(ait);
 
-        logInfo("Searching for set %d (try %d): base_phy=0x%lx\n",
+        printf("Searching for set %d (try %d): base_phy=0x%lx\n",
                 found_sets + 1, failed, base_phys);
         timing.clear();
 
