@@ -524,6 +524,7 @@ int main(int argc, char *argv[]) {
     int c;
     int samebank_threshold = 0; // default: use gap search, >0: use this value as threshold, -2: use k-means clustering
     int cpu_affinity = -1;
+    int target_n = 125; // target number of addresses per set
     int quit_sets = -1; // number of sets to quit early
 
     // print the commandline used
@@ -533,7 +534,7 @@ int main(int argc, char *argv[]) {
     }
     printf("\n");
 
-    while ((c = getopt(argc, argv, "b:c:e:r:g:m:i:j:s:q:t:v:f:h")) != -1) {
+    while ((c = getopt(argc, argv, "b:c:e:r:g:m:i:j:k:s:q:t:v:f:h")) != -1) {
         switch (c) {
         case 'b':
             g_start_bit = atoi(optarg);
@@ -558,6 +559,9 @@ int main(int argc, char *argv[]) {
             break;
         case 'j':
             num_reads_inner = atol(optarg);
+            break;
+        case 'k':
+            target_n = atoi(optarg);
             break;
         case 's':
             expected_sets = atoi(optarg);
@@ -623,7 +627,7 @@ int main(int argc, char *argv[]) {
     int found_sets = 0;
     int found_siblings = 0;
 
-    tries = (expected_sets + 1) * 125; // #of address samples to try.
+    tries = expected_sets * target_n; // #of address samples to try.
 
     // build address pool
     while (int cur_count = addr_pool.size() < tries) {
