@@ -524,6 +524,7 @@ int main(int argc, char *argv[]) {
     int c;
     int samebank_threshold = 0; // default: use gap search, >0: use this value as threshold, -2: use k-means clustering
     int cpu_affinity = -1;
+    int target_n = 125; // target number of addresses per set
     int quit_sets = -1; // number of sets to quit early
 
     // print the commandline used
@@ -533,7 +534,7 @@ int main(int argc, char *argv[]) {
     }
     printf("\n");
 
-    while ((c = getopt(argc, argv, "b:c:e:r:g:m:i:j:s:q:t:v:f:h")) != -1) {
+    while ((c = getopt(argc, argv, "b:c:e:r:g:m:i:j:k:s:q:t:v:f:h")) != -1) {
         switch (c) {
         case 'b':
             g_start_bit = atoi(optarg);
@@ -558,6 +559,9 @@ int main(int argc, char *argv[]) {
             break;
         case 'j':
             num_reads_inner = atol(optarg);
+            break;
+        case 'k':
+            target_n = atoi(optarg);
             break;
         case 's':
             expected_sets = atoi(optarg);
@@ -623,7 +627,7 @@ int main(int argc, char *argv[]) {
     int found_sets = 0;
     int found_siblings = 0;
 
-    tries = expected_sets * 125; // DEBUG: original 125.
+    tries = expected_sets * target_n; // #of address samples to try.
 
     // build address pool
     while (int cur_count = addr_pool.size() < tries) {
@@ -644,6 +648,8 @@ int main(int argc, char *argv[]) {
     int failed;
     uint64_t measure_count = 0;
 
+    int prev_found_cycle = 0;
+
     while (found_sets < expected_sets) {
         for (size_t i = 0; i < MAX_HIST_SIZE; ++i)
             hist[i] = 0;
@@ -660,15 +666,40 @@ int main(int argc, char *argv[]) {
         std::advance(ait, rand() % addr_pool.size());
         base = ait->first;
         base_phys = ait->second;
+
+        // verify that base address is not already in any of the found sets
+        // the verification is done by checking if the measured timing between the first
+        // address of each found set and the new base address shows a row hit (low timing)
+        // or a row miss (high timing). If the timing is high, it means that the new base
+        // address is in the same bank as the first address of the found set, and thus
+        // should not be used as a base address for a new set. If the timing is low, it
+        // means that the new base address is in a different bank, and can be used as a base
+        // address for a new set.
+        if (found_sets > 0) {
+            logDebug("Verifying base address 0x%lx against %d found sets...\n", base, found_sets);
+
+            for (size_t s = 0; s < found_sets; s++) {
+                if (sets[s].size() == 0) continue;
+                pointer set_base = sets[s][0].first;
+                uint64_t timing = getTiming(base, set_base);
+                if (timing >= prev_found_cycle) {
+                    logError("Base address 0x%lx is in the same bank as set %zu (timing: %lu >= %d), skipping...\n", base, s, timing, prev_found_cycle);
+                    goto search_set;
+                }
+            }
+        }
+
+        // remove base address from pool to avoid reusing it
         addr_pool.erase(ait);
 
-        logInfo("Searching for set %d (try %d): base_phy=0x%lx\n",
+        printf("Searching for set %d (try %d): base_phy=0x%lx\n",
                 found_sets + 1, failed, base_phys);
         timing.clear();
 
         auto pool_it = addr_pool.begin();
         // iterate over the addr_pool and measure access times
         measure_count = 0;
+
         while (pool_it != addr_pool.end()) {
 
             first = pool_it->first;
@@ -686,6 +717,10 @@ int main(int argc, char *argv[]) {
             pool_it++;
         }
         printf("Measured %lu addresses\n", measure_count);
+
+        // add rowhit timing sample to ensure at least one rowhit timing is present in the histogram
+        t = getTiming(base, base + 64);
+        timing[t].push_back(std::make_pair(base, base_phys));
 
         // identify sets -> must be on the right, separated in the histogram
         std::vector <addrpair> new_set; // virtual and physical address pairs of the identified set
@@ -720,8 +755,9 @@ int main(int argc, char *argv[]) {
 
             printf("\n");
         }
+
         // find separation
-        int empty = 0, found = 0;
+        int empty = 0, found = 0; // found is the threshold to separate same-bank from different-bank timings
 
         if (samebank_threshold > 0) {
             found = samebank_threshold;
@@ -789,6 +825,7 @@ int main(int argc, char *argv[]) {
         }
 
         new_set.push_back(std::make_pair(base, base_phys)); // this is needed. another bug in the original code
+        prev_found_cycle = found;
 
         // remove found addresses from pool
         for (hit = timing.begin(); hit != timing.end(); hit++) {
@@ -817,7 +854,7 @@ int main(int argc, char *argv[]) {
         for (size_t i = 1; i < new_set.size(); i++) {
             // re-measure timing (exclude base address at index 0)
             t = getTiming(base, new_set[i].first);
-            if (t < found - 2) { // within 2 cycles of the threshold is okay
+            if (t < found) {
                 logWarning("Validation failed: address 0x%lx has timing %lu < %d. removing it from the set\n",
                            new_set[i].first, t, found);
                 // remove it from the new set
