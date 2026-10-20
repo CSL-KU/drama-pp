@@ -849,7 +849,7 @@ int main(int argc, char *argv[]) {
         for (size_t i = 1; i < new_set.size(); i++) {
             // re-measure timing (exclude base address at index 0)
             t = getTiming(base, new_set[i].first);
-            if (t < found - 2) { // within 2 cycles of the threshold is okay
+            if (t < found) {
                 logWarning("Validation failed: address 0x%lx has timing %lu < %d. removing it from the set\n",
                            new_set[i].first, t, found);
                 // remove it from the new set
