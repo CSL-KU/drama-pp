@@ -54,6 +54,12 @@ Notes:
 - `-v`: verbosity level.
 - `-f`: output file for discovered functions (default `map.txt`).
 
+The same-L1D-set filter derives its address mask from the selected CPU's L1
+data (or unified) cache line size and number of sets in Linux sysfs. Use `-v 2`
+to see the detected geometry and mask. This assumes contiguous, un-hashed
+physical-address set bits and power-of-two geometry. If the geometry cannot
+be read or is unsupported, the tool warns and disables the filter.
+
 ### Outputs
 
 - `setN.txt`: physical addresses of each discovered same-bank set.

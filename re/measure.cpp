@@ -18,6 +18,9 @@
 #include <sys/resource.h>
 #include <iterator>
 #include <math.h>
+#include <dirent.h>
+#include <fstream>
+#include <string>
 #include "measure.h"
 
 
@@ -496,6 +499,57 @@ void save_bank_functions(const char* filename,
     printf("Bank mapping functions saved to %s\n", filename);
 }
 
+static uint64_t l1d_set_mask = 0;
+static bool l1d_filter_enabled = false;
+
+static void init_l1d_set_mask(int cpu)
+{
+    l1d_set_mask = 0;
+    l1d_filter_enabled = false;
+    const std::string cache_path = "/sys/devices/system/cpu/cpu" +
+                                   std::to_string(cpu) + "/cache";
+    DIR *cache_dir = opendir(cache_path.c_str());
+    if (cache_dir) {
+        struct dirent *entry;
+        while ((entry = readdir(cache_dir)) != nullptr) {
+            if (strncmp(entry->d_name, "index", 5) != 0) continue;
+            const std::string path = cache_path + "/" + entry->d_name + "/";
+            unsigned int level;
+            std::string type;
+            uint64_t line_size, num_sets;
+            if (!(std::ifstream(path + "level") >> level) || level != 1 ||
+                !(std::ifstream(path + "type") >> type) ||
+                (type != "Data" && type != "Unified")) continue;
+            if (!(std::ifstream(path + "coherency_line_size") >> line_size) ||
+                !(std::ifstream(path + "number_of_sets") >> num_sets)) continue;
+
+            // A contiguous index requires power-of-two geometry. Guard the
+            // product as well, since it defines the end of the index field.
+            if (line_size == 0 || (line_size & (line_size - 1)) != 0 ||
+                num_sets == 0 || (num_sets & (num_sets - 1)) != 0 ||
+                num_sets > UINT64_MAX / line_size) continue;
+
+            // Assumes conventional contiguous set indexing, not a hashed index.
+            l1d_set_mask = (num_sets - 1) * line_size;
+            l1d_filter_enabled = true;
+            logInfo("CPU %d L1D: line size %llu bytes, %llu sets, set mask 0x%llx\n",
+                    cpu, (unsigned long long)line_size,
+                    (unsigned long long)num_sets, (unsigned long long)l1d_set_mask);
+            break;
+        }
+        closedir(cache_dir);
+    }
+    if (!l1d_filter_enabled) {
+        logWarning("Cannot determine L1D set bits for CPU %d from sysfs; "
+                   "same-L1D-set filtering disabled\n", cpu);
+    }
+}
+
+static inline bool same_l1d_set(uint64_t pa1, uint64_t pa2)
+{
+    return l1d_filter_enabled && ((pa1 ^ pa2) & l1d_set_mask) == 0;
+}
+
 void usage()
 {
     printf("Usage: measure [options]\n");
@@ -612,6 +666,7 @@ int main(int argc, char *argv[]) {
         perror("sched_setaffinity");
         exit(1);
     }
+    init_l1d_set_mask(cpu_affinity);
     // set high priority
     int prio = -20;
     logInfo("Setting priority to %d\n", prio);
@@ -704,6 +759,12 @@ int main(int argc, char *argv[]) {
 
             first = pool_it->first;
             first_phys = pool_it->second;
+
+            // avoid measuring addresses that are in the same L1D cache set as the base address
+            if (same_l1d_set(base_phys, first_phys)) {
+                ++pool_it;
+                continue;  // Leave candidate in the pool.
+            }
 
             // measure timing
             t = getTiming(base, first);
