@@ -700,10 +700,6 @@ int main(int argc, char *argv[]) {
         // iterate over the addr_pool and measure access times
         measure_count = 0;
 
-        // add rowhit timing sample to ensure at least one rowhit timing is present in the histogram
-        t = getTiming(base, base + 64);
-        timing[t].push_back(std::make_pair(base, base_phys));
-
         while (pool_it != addr_pool.end()) {
 
             first = pool_it->first;
@@ -721,6 +717,10 @@ int main(int argc, char *argv[]) {
             pool_it++;
         }
         printf("Measured %lu addresses\n", measure_count);
+
+        // add rowhit timing sample to ensure at least one rowhit timing is present in the histogram
+        t = getTiming(base, base + 64);
+        timing[t].push_back(std::make_pair(base, base_phys));
 
         // identify sets -> must be on the right, separated in the histogram
         std::vector <addrpair> new_set; // virtual and physical address pairs of the identified set
