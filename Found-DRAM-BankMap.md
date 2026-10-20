@@ -91,6 +91,12 @@
 	32
 	33
 
+## AMD/Xilinx KRIA KR260/ZCU102 (Cortex-A53, 64bit DDR4, 4GB)
+
+	6
+	14
+	15
+
 ## NVIDIA Jetson TX1 (Cortex-A57, 64bit LPDDR4, 4GB)
 
 	Infered mapping:
