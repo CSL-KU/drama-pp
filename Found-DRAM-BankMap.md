@@ -67,7 +67,7 @@
 	13
 	14
 
-## Raspberry Pi 5 (Cortex-A76, LPDDR4X, 4GB)
+## Raspberry Pi 5 (Cortex-A76, 32bit LPDDR4X, 4GB)
 
 	Inferred mapping (SDRAM_BANKLOW = 4):
 	12
@@ -75,11 +75,30 @@
 	14
 	31
 
+## Raspberry Pi 5 (Cortex-A76, 32bit LPDDR4X, 8GB)
+
 	Inferred mapping (SDRAM_BANKLOW = 1, default):
 	12
 	30
 	31
 	32
+
+## Raspberry Pi 5 (Cortex-A76, 32bit LPDDR4X, 16GB)
+
+	Inferred mapping (SDRAM_BANKLOW = 1, default):
+	12
+	31
+	32
+	33
+
+## NVIDIA Jetson TX1 (Cortex-A57, 64bit LPDDR4, 4GB)
+
+	Infered mapping:
+	31
+	13 19 20 21 24 25 26 28
+	10 12 14 16 17 21 25 27 28
+	10 16 17 18 22 23 27 29 30
+	10 11 13 15 16 20 22 24 25 29
 
 ## NVIDIA Jetson Nano (Cortex-A57, 64bit LPDDR4, 4GB)
 
