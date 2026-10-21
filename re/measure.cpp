@@ -501,6 +501,7 @@ void save_bank_functions(const char* filename,
 
 static uint64_t l1d_set_mask = 0;
 static bool l1d_filter_enabled = false;
+static bool enable_l1d_filter = false;
 
 static void init_l1d_set_mask(int cpu)
 {
@@ -567,6 +568,8 @@ void usage()
     printf("  -t <samebank_threshold> Threshold in cycles to separate same-bank from different-bank timings (default: auto-detect)\n");
     printf("  -v <verbosity>      Verbosity level (0=silent, higher=more verbose, default: 1)\n");
     printf("  -f <output_file>    Output file to save discovered bank functions (default: none, print to stdout)\n");
+    printf("  -l                  Enable same-L1D-set filtering (disabled by default)\n");
+    printf("  -V <0|1>            Disable or enable set validation (default: 1)\n");
 }
 
 // ----------------------------------------------
@@ -576,10 +579,15 @@ int main(int argc, char *argv[]) {
     std::map<int, std::list<addrpair> > timing;
     size_t hist[MAX_HIST_SIZE];
     int c;
-    int samebank_threshold = 0; // default: use gap search, >0: use this value as threshold, -2: use k-means clustering
+#if defined(__aarch64__)
+    int samebank_threshold = 0; // 0: use gap search (default), >0: use this value as threshold, -2: use k-means clustering
+#else
+    int samebank_threshold = -2; // k-means clustering works better on x86
+#endif
     int cpu_affinity = -1;
     int target_n = 125; // target number of addresses per set
     int quit_sets = -1; // number of sets to quit early
+    bool validate_sets = true;
 
     // print the commandline used
     printf("Command:");
@@ -588,7 +596,7 @@ int main(int argc, char *argv[]) {
     }
     printf("\n");
 
-    while ((c = getopt(argc, argv, "b:c:e:r:g:m:i:j:k:s:q:t:v:f:h")) != -1) {
+    while ((c = getopt(argc, argv, "b:c:e:r:g:m:i:j:k:s:q:t:v:f:lV:h")) != -1) {
         switch (c) {
         case 'b':
             g_start_bit = atoi(optarg);
@@ -632,6 +640,20 @@ int main(int argc, char *argv[]) {
         case 'f':
             g_output_file = optarg;
             break;
+        case 'l':
+            enable_l1d_filter = true;
+            break;
+        case 'V':
+            if (strcmp(optarg, "0") == 0) {
+                validate_sets = false;
+            } else if (strcmp(optarg, "1") == 0) {
+                validate_sets = true;
+            } else {
+                fprintf(stderr, "Invalid validation setting '%s'; use 0 or 1.\n", optarg);
+                usage();
+                exit(1);
+            }
+            break;
         case 'h':
             usage();
             exit(0);
@@ -666,7 +688,9 @@ int main(int argc, char *argv[]) {
         perror("sched_setaffinity");
         exit(1);
     }
-    init_l1d_set_mask(cpu_affinity);
+    if (enable_l1d_filter) {
+        init_l1d_set_mask(cpu_affinity);
+    }
     // set high priority
     int prio = -20;
     logInfo("Setting priority to %d\n", prio);
@@ -910,20 +934,22 @@ int main(int argc, char *argv[]) {
             goto search_set;
         }
 
-        // validate if all addresses in the new set are indeed same-bank
-        logDebug("Validating set with %lu addresses...\n", new_set.size());
-        for (size_t i = 1; i < new_set.size(); i++) {
-            // re-measure timing (exclude base address at index 0)
-            t = getTiming(base, new_set[i].first);
-            if (t < found) {
-                logWarning("Validation failed: address 0x%lx has timing %lu < %d. removing it from the set\n",
-                           new_set[i].first, t, found);
-                // remove it from the new set
-                new_set.erase(new_set.begin() + i);
-                i--;
+        if (validate_sets) {
+            // validate if all addresses in the new set are indeed same-bank
+            logDebug("Validating set with %lu addresses...\n", new_set.size());
+            for (size_t i = 1; i < new_set.size(); i++) {
+                // re-measure timing (exclude base address at index 0)
+                t = getTiming(base, new_set[i].first);
+                if (t < found) {
+                    logWarning("Validation failed: address 0x%lx has timing %lu < %d. removing it from the set\n",
+                               new_set[i].first, t, found);
+                    // remove it from the new set
+                    new_set.erase(new_set.begin() + i);
+                    i--;
+                }
             }
+            logDebug("Validation done. New set size: %lu\n", new_set.size());
         }
-        logDebug("Validation done. New set size: %lu\n", new_set.size());
         // remove found addresses from pool
         logDebug("Removing found addresses from pool (%lu) -->", addr_pool.size());
         for (auto it = addr_pool.begin(); it != addr_pool.end();) {
