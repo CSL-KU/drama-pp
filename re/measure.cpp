@@ -501,7 +501,7 @@ void save_bank_functions(const char* filename,
 
 static uint64_t l1d_set_mask = 0;
 static bool l1d_filter_enabled = false;
-static bool enable_l1d_filter = false;
+static bool enable_l1d_filter = true;
 
 static void init_l1d_set_mask(int cpu)
 {
@@ -568,7 +568,7 @@ void usage()
     printf("  -t <samebank_threshold> Threshold in cycles to separate same-bank from different-bank timings (default: auto-detect)\n");
     printf("  -v <verbosity>      Verbosity level (0=silent, higher=more verbose, default: 1)\n");
     printf("  -f <output_file>    Output file to save discovered bank functions (default: none, print to stdout)\n");
-    printf("  -l                  Enable same-L1D-set filtering (disabled by default)\n");
+    printf("  -L <0|1>            Disable or enable same-L1D-set filtering (default: 1)\n");
     printf("  -V <0|1>            Disable or enable set validation (default: 1)\n");
 }
 
@@ -596,7 +596,7 @@ int main(int argc, char *argv[]) {
     }
     printf("\n");
 
-    while ((c = getopt(argc, argv, "b:c:e:r:g:m:i:j:k:s:q:t:v:f:lV:h")) != -1) {
+    while ((c = getopt(argc, argv, "b:c:e:r:g:m:i:j:k:s:q:t:v:f:LVh")) != -1) {
         switch (c) {
         case 'b':
             g_start_bit = atoi(optarg);
@@ -640,19 +640,11 @@ int main(int argc, char *argv[]) {
         case 'f':
             g_output_file = optarg;
             break;
-        case 'l':
-            enable_l1d_filter = true;
+        case 'L':
+            enable_l1d_filter = false;
             break;
         case 'V':
-            if (strcmp(optarg, "0") == 0) {
-                validate_sets = false;
-            } else if (strcmp(optarg, "1") == 0) {
-                validate_sets = true;
-            } else {
-                fprintf(stderr, "Invalid validation setting '%s'; use 0 or 1.\n", optarg);
-                usage();
-                exit(1);
-            }
+            validate_sets = false;
             break;
         case 'h':
             usage();
