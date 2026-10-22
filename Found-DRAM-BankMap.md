@@ -109,9 +109,9 @@
 ## NVIDIA Jetson Nano (Cortex-A57, 64bit LPDDR4, 4GB)
 
 	Infered mapping:
-	13 19 20 21 24 25 26 28
 	10 12 14 16 17 21 25 27 28
 	10 16 17 18 22 23 27 29 30
+	13 19 20 21 24 25 26 28 31
 	10 11 13 15 16 20 22 24 25 29
 
 ## NVIDIA Jetson Orin Nano (Cortex-A78E, LPDDR5, 8GB)
