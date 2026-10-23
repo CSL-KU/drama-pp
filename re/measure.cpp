@@ -567,9 +567,9 @@ void usage()
     printf("  -q <quit_sets>      Quit early after finding this many sets (default: -1, meaning find all expected sets)\n");
     printf("  -t <samebank_threshold> Threshold in cycles to separate same-bank from different-bank timings (default: auto-detect)\n");
     printf("  -v <verbosity>      Verbosity level (0=silent, higher=more verbose, default: 1)\n");
-    printf("  -f <output_file>    Output file to save discovered bank functions (default: none, print to stdout)\n");
-    printf("  -L <0|1>            Disable or enable same-L1D-set filtering (default: 1)\n");
-    printf("  -V <0|1>            Disable or enable set validation (default: 1)\n");
+    printf("  -f <output_file>    Output file to save discovered bank functions (default `map.txt`)\n");
+    printf("  -L                  Disable same-L1D-set filtering\n");
+    printf("  -V                  Disable set validation\n");
 }
 
 // ----------------------------------------------
