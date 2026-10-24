@@ -588,6 +588,7 @@ int main(int argc, char *argv[]) {
     int target_n = 125; // target number of addresses per set
     int quit_sets = -1; // number of sets to quit early
     bool validate_sets = true;
+    bool duplicate_check = true;
 
     // print the commandline used
     printf("Command:");
@@ -596,7 +597,7 @@ int main(int argc, char *argv[]) {
     }
     printf("\n");
 
-    while ((c = getopt(argc, argv, "b:c:e:r:g:m:i:j:k:s:q:t:v:f:LVh")) != -1) {
+    while ((c = getopt(argc, argv, "b:c:e:r:g:m:i:j:k:s:q:t:v:f:LVDh")) != -1) {
         switch (c) {
         case 'b':
             g_start_bit = atoi(optarg);
@@ -645,6 +646,9 @@ int main(int argc, char *argv[]) {
             break;
         case 'V':
             validate_sets = false;
+            break;
+        case 'D':
+            duplicate_check = false;
             break;
         case 'h':
             usage();
@@ -746,7 +750,7 @@ int main(int argc, char *argv[]) {
         // should not be used as a base address for a new set. If the timing is low, it
         // means that the new base address is in a different bank, and can be used as a base
         // address for a new set.
-        if (found_sets > 0) {
+        if (duplicate_check && found_sets > 0) {
             logDebug("Verifying base address 0x%lx against %d found sets...\n", base, found_sets);
 
             for (size_t s = 0; s < found_sets; s++) {
