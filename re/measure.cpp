@@ -1109,107 +1109,87 @@ int main(int argc, char *argv[]) {
     }
 
     // optimize functions -> remove all, that are combinations of others
-    std::map<int, std::vector<pointer> > duplicates;
+    // Remove functions whose outputs are affine combinations of
+    // previously retained functions on the sampled address domain.
+    std::map<int, std::vector<pointer>> duplicates;
 
-    // get dimensions
-    uint64_t rows = 0, cols = 0;
-    // find number of functions, highest bit and lowest bit
-    for (int bits = 1; bits <= MAX_XOR_BITS; bits++) {
-        rows += functions[bits].size();
-	    logDebug("functions[%d].size(): %ld\n", bits, functions[bits].size());
-        for (pointer f : functions[bits]) {
-            if (f > cols) cols = f;
-        }
-    }
-    cols = (int) (std::log2(cols) + 0.5) + 1;
-
-    // allocate matrix
-    int **matrix = new int *[rows];
-    for (int r = 0; r < rows; r++) {
-        matrix[r] = new int[cols];
+    // One representative per nonempty same-bank set.
+    // The GF(2) solver already enforces within-set consistency.
+    std::vector<uint64_t> representatives;
+    for (const auto &set : sets) {
+        if (!set.empty())
+            representatives.push_back(mapping_address(set[0].second));
     }
 
-    // build matrix
-    int r = 0;
-    for (int bits = 1; bits <= MAX_XOR_BITS; bits++) {
-        for (pointer f : functions[bits]) {
+    // Each basis entry is indexed by its first nonzero position.
+    // An empty entry means that pivot has not yet been used.
+    using Signature = std::vector<uint8_t>;
+    std::vector<Signature> basis(representatives.size());
 
-            for (int b = 0; b < cols; b++) {
-                matrix[r][cols - b - 1] = (f & (1ull << b)) ? 1 : 0;
-            }
-            r++;
-        }
-    }
+    size_t retained = 0;
 
-    // transpose matrix
-    int **matrix_t = new int *[cols];
-    for (int r = 0; r < cols; r++) {
-        matrix_t[r] = new int[rows];
-    }
-    for (int i = 0; i < rows; i++) {
-        for (int j = 0; j < cols; j++) {
-            matrix_t[j][i] = matrix[i][j];
-        }
-    }
+    for (int bits = 1; bits <= MAX_XOR_BITS; ++bits) {
+        // Initialize every entry: save_bank_functions() uses .at(bits).
+        auto &rejected = duplicates[bits];
 
-    int i = 0;
-    int j = 0;
-    int t_rows = cols;
-    int t_cols = rows;
-    std::vector<int> jb;
-    // gauss-jordan
-    while (i < t_rows && j < t_cols) {
+        // Prefer simpler functions; for equal weight, prefer smaller masks.
+        // Sort a copy so functions[] stays aligned with prob[].
+        std::vector<pointer> candidates = functions[bits];
+        std::sort(candidates.begin(), candidates.end());
 
-        // get value and index of largest element in current column j
-        int max_v = -9999, max_p = 0;
-        for (int p = i; p < t_rows; p++) {
-            if (matrix_t[p][j] > max_v) {
-                max_v = matrix_t[p][j];
-                max_p = p;
-            }
-        }
-        if (max_v == 0) {
-            // column is zero, goto next
-            j++;
-        } else {
-            // remember column index
-            jb.push_back(j);
-            // swap i-th and max_p-th row
-            int *temp_row = matrix_t[i];
-            matrix_t[i] = matrix_t[max_p];
-            matrix_t[max_p] = temp_row;
-
-            // subtract multiples of the pivot row from all other rows
-            for (int k = 0; k < t_rows; k++) {
-                if (k == i) continue;
-                int kj = matrix_t[k][j];
-                for (int p = j; p < t_cols; p++) {
-                    matrix_t[k][p] ^= kj & matrix_t[i][p];
+        for (pointer mask : candidates) {
+            // Match the existing display/save filter. Functions hidden
+            // by that filter must not consume a basis position.
+            bool filtered = false;
+            for (pointer fp : false_positives) {
+                if ((mask & fp) == fp) {
+                    filtered = true;
+                    break;
                 }
             }
-            i++;
-            j++;
-        }
-    }
 
-    std::cout << "reduced to " << jb.size() << " functions" << std::endl;
-
-    // remove duplicates
-    r = 0;
-    for (int bits = 1; bits <= MAX_XOR_BITS; bits++) {
-        for (pointer f : functions[bits]) {
-            if (std::find(jb.begin(), jb.end(), r) == jb.end()) {
-                duplicates[bits].push_back(f);
+            if (filtered || representatives.empty()) {
+                rejected.push_back(mask);
+                continue;
             }
-            r++;
+
+            const uint8_t reference =
+                apply_bitmask(representatives[0], mask) ? 1 : 0;
+
+            Signature signature(representatives.size());
+            for (size_t s = 0; s < representatives.size(); ++s) {
+                const uint8_t output =
+                    apply_bitmask(representatives[s], mask) ? 1 : 0;
+                signature[s] = output ^ reference;
+            }
+
+            // Reduce against the existing basis.
+            bool independent = false;
+
+            for (size_t pivot = 0; pivot < signature.size(); ++pivot) {
+                if (signature[pivot] == 0)
+                    continue;
+
+                if (basis[pivot].empty()) {
+                    basis[pivot] = std::move(signature);
+                    independent = true;
+                    ++retained;
+                    break;
+                }
+
+                for (size_t s = pivot; s < signature.size(); ++s)
+                    signature[s] ^= basis[pivot][s];
+            }
+
+            // A zero reduced signature is constant or dependent.
+            if (!independent)
+                rejected.push_back(mask);
         }
     }
 
-    for (int i = 0; i < rows; i++) {
-        delete[] matrix[i];
-    }
-    delete[] matrix;
-
+    std::cout << "reduced to " << retained
+            << " independent functions on sampled addresses"
+            << std::endl;
 
     // display found functions
     for (int bits = 1; bits <= MAX_XOR_BITS; bits++) {
