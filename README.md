@@ -38,7 +38,7 @@ This produces the `measure` binary in `re/`.
 Measure DRAM bank functions and save them to `map.txt`:
 
 ```
-./measure [-b <start bit>] [-e <end bit>] [-c <cpu core>] [-r <scale factor>] [-m <memory size>] [-g <memory size in GB>] [-i <outer loops>] [-j <inner loops>] [-s <expected sets>] [-q <sets for early quit>] [-t <threshold cycles>] [-v <verbosity>] [-f <output file>]
+./measure [-b <start bit>] [-e <end bit>] [-c <cpu core>] [-r <scale factor>] [-m <memory size>] [-g <memory size in GB>] [-i <outer loops>] [-j <inner loops>] [-s <expected sets>] [-q <sets for early quit>] [-t <threshold cycles>] [-v <verbosity>] [-f <output file>] [-L] [-V]
 
 ```
 
@@ -53,6 +53,15 @@ Notes:
 - `-q`: stop after N sets are found.
 - `-v`: verbosity level.
 - `-f`: output file for discovered functions (default `map.txt`).
+- `-L`: disable same-L1D-set filtering (enabled by default).
+- `-V`: disable validation of discovered set members (enabled by default).
+
+When enabled, the same-L1D-set filter derives its address mask from the
+selected CPU's L1 data (or unified) cache line size and number of sets in Linux
+sysfs. Use `-v 2` to see the detected geometry and mask. This assumes
+contiguous, un-hashed physical-address set bits and power-of-two geometry. If
+the geometry cannot be read or is unsupported, the tool warns and disables the
+filter.
 
 ### Outputs
 

@@ -18,6 +18,9 @@
 #include <sys/resource.h>
 #include <iterator>
 #include <math.h>
+#include <dirent.h>
+#include <fstream>
+#include <string>
 #include "measure.h"
 
 
@@ -496,6 +499,58 @@ void save_bank_functions(const char* filename,
     printf("Bank mapping functions saved to %s\n", filename);
 }
 
+static uint64_t l1d_set_mask = 0;
+static bool l1d_filter_enabled = false;
+static bool enable_l1d_filter = true;
+
+static void init_l1d_set_mask(int cpu)
+{
+    l1d_set_mask = 0;
+    l1d_filter_enabled = false;
+    const std::string cache_path = "/sys/devices/system/cpu/cpu" +
+                                   std::to_string(cpu) + "/cache";
+    DIR *cache_dir = opendir(cache_path.c_str());
+    if (cache_dir) {
+        struct dirent *entry;
+        while ((entry = readdir(cache_dir)) != nullptr) {
+            if (strncmp(entry->d_name, "index", 5) != 0) continue;
+            const std::string path = cache_path + "/" + entry->d_name + "/";
+            unsigned int level;
+            std::string type;
+            uint64_t line_size, num_sets;
+            if (!(std::ifstream(path + "level") >> level) || level != 1 ||
+                !(std::ifstream(path + "type") >> type) ||
+                (type != "Data" && type != "Unified")) continue;
+            if (!(std::ifstream(path + "coherency_line_size") >> line_size) ||
+                !(std::ifstream(path + "number_of_sets") >> num_sets)) continue;
+
+            // A contiguous index requires power-of-two geometry. Guard the
+            // product as well, since it defines the end of the index field.
+            if (line_size == 0 || (line_size & (line_size - 1)) != 0 ||
+                num_sets == 0 || (num_sets & (num_sets - 1)) != 0 ||
+                num_sets > UINT64_MAX / line_size) continue;
+
+            // Assumes conventional contiguous set indexing, not a hashed index.
+            l1d_set_mask = (num_sets - 1) * line_size;
+            l1d_filter_enabled = true;
+            logInfo("CPU %d L1D: line size %llu bytes, %llu sets, set mask 0x%llx\n",
+                    cpu, (unsigned long long)line_size,
+                    (unsigned long long)num_sets, (unsigned long long)l1d_set_mask);
+            break;
+        }
+        closedir(cache_dir);
+    }
+    if (!l1d_filter_enabled) {
+        logWarning("Cannot determine L1D set bits for CPU %d from sysfs; "
+                   "same-L1D-set filtering disabled\n", cpu);
+    }
+}
+
+static inline bool same_l1d_set(uint64_t pa1, uint64_t pa2)
+{
+    return l1d_filter_enabled && ((pa1 ^ pa2) & l1d_set_mask) == 0;
+}
+
 void usage()
 {
     printf("Usage: measure [options]\n");
@@ -512,7 +567,9 @@ void usage()
     printf("  -q <quit_sets>      Quit early after finding this many sets (default: -1, meaning find all expected sets)\n");
     printf("  -t <samebank_threshold> Threshold in cycles to separate same-bank from different-bank timings (default: auto-detect)\n");
     printf("  -v <verbosity>      Verbosity level (0=silent, higher=more verbose, default: 1)\n");
-    printf("  -f <output_file>    Output file to save discovered bank functions (default: none, print to stdout)\n");
+    printf("  -f <output_file>    Output file to save discovered bank functions (default `map.txt`)\n");
+    printf("  -L                  Disable same-L1D-set filtering\n");
+    printf("  -V                  Disable set validation\n");
 }
 
 // ----------------------------------------------
@@ -522,10 +579,16 @@ int main(int argc, char *argv[]) {
     std::map<int, std::list<addrpair> > timing;
     size_t hist[MAX_HIST_SIZE];
     int c;
-    int samebank_threshold = 0; // default: use gap search, >0: use this value as threshold, -2: use k-means clustering
+#if defined(__aarch64__)
+    int samebank_threshold = 0; // 0: use gap search (default), >0: use this value as threshold, -2: use k-means clustering
+#else
+    int samebank_threshold = -2; // k-means clustering works better on x86
+#endif
     int cpu_affinity = -1;
     int target_n = 125; // target number of addresses per set
     int quit_sets = -1; // number of sets to quit early
+    bool validate_sets = true;
+    bool duplicate_check = true;
 
     // print the commandline used
     printf("Command:");
@@ -534,7 +597,7 @@ int main(int argc, char *argv[]) {
     }
     printf("\n");
 
-    while ((c = getopt(argc, argv, "b:c:e:r:g:m:i:j:k:s:q:t:v:f:h")) != -1) {
+    while ((c = getopt(argc, argv, "b:c:e:r:g:m:i:j:k:s:q:t:v:f:LVDh")) != -1) {
         switch (c) {
         case 'b':
             g_start_bit = atoi(optarg);
@@ -578,6 +641,15 @@ int main(int argc, char *argv[]) {
         case 'f':
             g_output_file = optarg;
             break;
+        case 'L':
+            enable_l1d_filter = false;
+            break;
+        case 'V':
+            validate_sets = false;
+            break;
+        case 'D':
+            duplicate_check = false;
+            break;
         case 'h':
             usage();
             exit(0);
@@ -611,6 +683,9 @@ int main(int argc, char *argv[]) {
     if (sched_setaffinity(0, sizeof(cpu_set_t), &set) != 0) {
         perror("sched_setaffinity");
         exit(1);
+    }
+    if (enable_l1d_filter) {
+        init_l1d_set_mask(cpu_affinity);
     }
     // set high priority
     int prio = -20;
@@ -675,7 +750,7 @@ int main(int argc, char *argv[]) {
         // should not be used as a base address for a new set. If the timing is low, it
         // means that the new base address is in a different bank, and can be used as a base
         // address for a new set.
-        if (found_sets > 0) {
+        if (duplicate_check && found_sets > 0) {
             logDebug("Verifying base address 0x%lx against %d found sets...\n", base, found_sets);
 
             for (size_t s = 0; s < found_sets; s++) {
@@ -704,6 +779,12 @@ int main(int argc, char *argv[]) {
 
             first = pool_it->first;
             first_phys = pool_it->second;
+
+            // avoid measuring addresses that are in the same L1D cache set as the base address
+            if (same_l1d_set(base_phys, first_phys)) {
+                ++pool_it;
+                continue;  // Leave candidate in the pool.
+            }
 
             // measure timing
             t = getTiming(base, first);
@@ -849,20 +930,22 @@ int main(int argc, char *argv[]) {
             goto search_set;
         }
 
-        // validate if all addresses in the new set are indeed same-bank
-        logDebug("Validating set with %lu addresses...\n", new_set.size());
-        for (size_t i = 1; i < new_set.size(); i++) {
-            // re-measure timing (exclude base address at index 0)
-            t = getTiming(base, new_set[i].first);
-            if (t < found) {
-                logWarning("Validation failed: address 0x%lx has timing %lu < %d. removing it from the set\n",
-                           new_set[i].first, t, found);
-                // remove it from the new set
-                new_set.erase(new_set.begin() + i);
-                i--;
+        if (validate_sets) {
+            // validate if all addresses in the new set are indeed same-bank
+            logDebug("Validating set with %lu addresses...\n", new_set.size());
+            for (size_t i = 1; i < new_set.size(); i++) {
+                // re-measure timing (exclude base address at index 0)
+                t = getTiming(base, new_set[i].first);
+                if (t < found) {
+                    logWarning("Validation failed: address 0x%lx has timing %lu < %d. removing it from the set\n",
+                               new_set[i].first, t, found);
+                    // remove it from the new set
+                    new_set.erase(new_set.begin() + i);
+                    i--;
+                }
             }
+            logDebug("Validation done. New set size: %lu\n", new_set.size());
         }
-        logDebug("Validation done. New set size: %lu\n", new_set.size());
         // remove found addresses from pool
         logDebug("Removing found addresses from pool (%lu) -->", addr_pool.size());
         for (auto it = addr_pool.begin(); it != addr_pool.end();) {
