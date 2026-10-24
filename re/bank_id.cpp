@@ -5,6 +5,9 @@
 #include <sstream>
 #include <cstdint>
 #include <cstring>
+#include <dirent.h>
+#include <sched.h>
+#include <unistd.h>
 
 int g_debug = 0;
 static std::vector<std::vector<int>> g_bank_functions;
@@ -67,19 +70,77 @@ int paddr_to_color(unsigned long mask, unsigned long paddr)
     return color;
 }
 
+// Append L1D/L2/L3 indices using the current CPU's cache geometry.
+// Assumes contiguous physical-address set bits; hashing/slices are not modeled.
+void print_cache_set_indices(uint64_t address) {
+    int cpu = sched_getcpu();
+    if (cpu < 0) cpu = 0;
+    const std::string cache_path = "/sys/devices/system/cpu/cpu" +
+                                   std::to_string(cpu) + "/cache";
+    uint64_t line_sizes[4] = {};
+    uint64_t set_counts[4] = {};
+    DIR* cache_dir = opendir(cache_path.c_str());
+    if (cache_dir) {
+        struct dirent* entry;
+        while ((entry = readdir(cache_dir)) != nullptr) {
+            if (strncmp(entry->d_name, "index", 5) != 0) continue;
+            const std::string path = cache_path + "/" + entry->d_name + "/";
+            unsigned int level;
+            std::string type;
+            uint64_t line_size, num_sets;
+            if (!(std::ifstream(path + "level") >> level) || level < 1 || level > 3 ||
+                !(std::ifstream(path + "type") >> type) ||
+                (type != "Data" && type != "Unified")) continue;
+            if (!(std::ifstream(path + "coherency_line_size") >> line_size) ||
+                !(std::ifstream(path + "number_of_sets") >> num_sets)) continue;
+            // Contiguous set bits require power-of-two geometry.
+            if (line_size == 0 || (line_size & (line_size - 1)) != 0 ||
+                num_sets == 0 || (num_sets & (num_sets - 1)) != 0) continue;
+            line_sizes[level] = line_size;
+            set_counts[level] = num_sets;
+        }
+        closedir(cache_dir);
+    }
+
+    for (int level = 1; level <= 3; ++level) {
+        std::cout << ' ';
+        if (set_counts[level] != 0) {
+            std::cout << (address / line_sizes[level]) % set_counts[level];
+        } else {
+            std::cout << "N/A";
+        }
+    }
+}
+
 int main(int argc, char *argv[]) {
-    if (argc != 3) {
-        std::cout << "Usage: " << argv[0] << " <map file> <physical_address>" << std::endl;
+    bool print_cache = false;
+    int option;
+    while ((option = getopt(argc, argv, "c")) != -1) {
+        if (option == 'c') {
+            print_cache = true;
+        } else {
+            std::cerr << "Usage: " << argv[0]
+                      << " [-c] <map file> <physical_address>\n"
+                      << "  -c  Include L1D, L2, and L3 set indices\n";
+            return 1;
+        }
+    }
+    if (argc - optind != 2) {
+        std::cerr << "Usage: " << argv[0]
+                  << " [-c] <map file> <physical_address>\n"
+                  << "  -c  Include L1D, L2, and L3 set indices\n";
         return 1;
     }
-    uint64_t address = std::stoull(argv[2], nullptr, 0);
+    uint64_t address = std::stoull(argv[optind + 1], nullptr, 0);
 
-    read_bank_map_file(argv[1]);
+    read_bank_map_file(argv[optind]);
 
     int bank_num = 0;
 
     bank_num = paddr_to_color(0, address);
-    std::cout << "Physical address 0x" << std::hex << address << " maps to bank " << std::dec << bank_num << std::endl;
+    std::cout << "0x" << std::hex << address << ' ' << std::dec << bank_num;
+    if (print_cache) print_cache_set_indices(address);
+    std::cout << std::endl;
     
     return 0;
 }
