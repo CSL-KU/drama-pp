@@ -1,4 +1,7 @@
 #include <iostream>
+#include <cerrno>
+#include <cinttypes>
+#include <getopt.h>
 #include <stdio.h>
 #include <assert.h>
 #include <fcntl.h>
@@ -44,6 +47,18 @@ size_t expected_sets = 16;
 int g_start_bit = 5; // search start bit
 int g_end_bit = 40; // search end bit
 char* g_output_file = nullptr;
+
+// 0 disables adjustment; use 0x80000000 for a 2 GiB DRAM hole.
+static uint64_t g_dram_hole_size = 0;
+constexpr uint64_t FOUR_GIB = 1ULL << 32;
+
+static inline uint64_t mapping_address(uint64_t pa)
+{
+    // Input must be a valid RAM address.
+    if (g_dram_hole_size && pa >= FOUR_GIB)
+        return pa - g_dram_hole_size;
+    return pa;
+}
 
 // ----------------------------------------------
 
@@ -276,7 +291,7 @@ std::vector<double> prob_function(std::vector <pointer> masks, int align_bit) {
             // majority voting across addresses in this set for robustness
             int ones = 0;
             for (size_t a = 0; a < sets[set].size(); a++) {
-                if (apply_bitmask(sets[set][a].second, mask)) ones++;
+                if (apply_bitmask(mapping_address(sets[set][a].second), mask)) ones++;
             }
             // all addresses in the set must have parity 1 to count this set as 1
             int parity = (ones == (int)sets[set].size()) ? 1 : 0;
@@ -321,9 +336,10 @@ std::vector<pointer> find_function_linear(int bits, int pointer_bit, int align_b
 
     for (size_t s = 0; s < sets.size(); s++) {
         if (sets[s].size() <= 1) continue;
-        uint64_t base = (sets[s][0].second >> align_bit) & mask_window;
+        uint64_t base = (mapping_address(sets[s][0].second) >> align_bit) & mask_window;
         for (size_t j = 1; j < sets[s].size(); j++) {
-            uint64_t v = ((sets[s][j].second >> align_bit) & mask_window) ^ base;
+            uint64_t addr = (mapping_address(sets[s][j].second) >> align_bit) & mask_window;
+            uint64_t v = addr ^ base;
             if (v == 0) continue; // trivial equation
             rows.push_back(v);
         }
@@ -449,6 +465,48 @@ std::vector<pointer> find_function_linear(int bits, int pointer_bit, int align_b
 }
 
 
+static bool save_mapping_metadata(const char *map_filename)
+{
+    const std::string filename =
+        std::string(map_filename) + ".meta.json";
+
+    FILE *fp = fopen(filename.c_str(), "w");
+    if (!fp) {
+        perror(filename.c_str());
+        return false;
+    }
+
+    const int written = fprintf(
+        fp,
+        "{\n"
+        "  \"schema_version\": 1,\n"
+        "  \"input_address_space\": \"system_physical\",\n"
+        "  \"address_unit\": \"byte\",\n"
+        "  \"bit_numbering\": \"lsb0\",\n"
+        "  \"mask_input\": \"transformed_address\",\n"
+        "  \"address_transform\": {\n"
+        "    \"type\": \"%s\",\n"
+        "    \"threshold_bytes\": \"0x%" PRIx64 "\",\n"
+        "    \"subtract_bytes\": \"0x%" PRIx64 "\"\n"
+        "  }\n"
+        "}\n",
+        g_dram_hole_size ? "subtract_if_ge" : "identity",
+        FOUR_GIB,
+        g_dram_hole_size);
+
+    // Always close, even if fprintf failed.
+    const int closed = fclose(fp);
+
+    if (written < 0 || closed != 0) {
+        fprintf(stderr, "Failed to write metadata: %s\n",
+                filename.c_str());
+        return false;
+    }
+
+    printf("Mapping metadata saved to %s\n", filename.c_str());
+    return true;
+}
+
 // ----------------------------------------------
 void save_bank_functions(const char* filename,
                         const std::map<int, std::vector<pointer>>& functions,
@@ -495,7 +553,17 @@ void save_bank_functions(const char* filename,
         }
     }
 
-    fclose(fp);
+    const bool write_failed = ferror(fp) != 0;
+    const int close_result = fclose(fp);
+
+    if (write_failed || close_result != 0) {
+        fprintf(stderr, "Failed to write bank mapping: %s\n", filename);
+        exit(EXIT_FAILURE);
+    }
+
+    if (!save_mapping_metadata(filename))
+        exit(EXIT_FAILURE);
+
     printf("Bank mapping functions saved to %s\n", filename);
 }
 
@@ -570,7 +638,19 @@ void usage()
     printf("  -f <output_file>    Output file to save discovered bank functions (default `map.txt`)\n");
     printf("  -L                  Disable same-L1D-set filtering\n");
     printf("  -V                  Disable set validation\n");
+    printf("  -D                  Disable duplicate checking\n");
+    printf("  --dram-hole-size <bytes>  DRAM hole adjustment in decimal or hex (default: 0; less than 4 GiB)\n");
 }
+
+enum {
+    OPT_DRAM_HOLE_SIZE = 1000
+};
+
+static const struct option long_options[] = {
+    {"dram-hole-size", required_argument, nullptr, OPT_DRAM_HOLE_SIZE},
+    {"help",          no_argument,       nullptr, 'h'},
+    {nullptr,         0,                 nullptr, 0}
+};
 
 // ----------------------------------------------
 int main(int argc, char *argv[]) {
@@ -597,7 +677,7 @@ int main(int argc, char *argv[]) {
     }
     printf("\n");
 
-    while ((c = getopt(argc, argv, "b:c:e:r:g:m:i:j:k:s:q:t:v:f:LVDh")) != -1) {
+    while ((c = getopt_long(argc, argv, "b:c:e:r:g:m:i:j:k:s:q:t:v:f:LVDh", long_options, nullptr)) != -1) {
         switch (c) {
         case 'b':
             g_start_bit = atoi(optarg);
@@ -650,6 +730,22 @@ int main(int argc, char *argv[]) {
         case 'D':
             duplicate_check = false;
             break;
+        case OPT_DRAM_HOLE_SIZE: {
+            char* end = nullptr;
+            errno = 0;
+            const long long hole_size = strtoll(optarg, &end, 0);
+            if (errno == ERANGE || end == optarg || *end != '\0' ||
+                hole_size < 0 || hole_size >= (1LL << 32)) {
+                fprintf(stderr,
+                        "Invalid --dram-hole-size '%s': "
+                        "expected decimal or hexadecimal bytes, "
+                        "0 <= size < 4 GiB.\n",
+                        optarg);
+                return EXIT_FAILURE;
+            }
+            g_dram_hole_size = static_cast<uint64_t>(hole_size);
+            break;
+        }
         case 'h':
             usage();
             exit(0);
